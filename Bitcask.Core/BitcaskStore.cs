@@ -14,10 +14,15 @@ namespace Bitcask.Core
     {
         Dictionary<string ,string> dict = new Dictionary<string, string>();
         private string filePath;
-        public BitcaskStore(string dbpath)
+        private string _dbPath;
+        public int _maxFileSize;
+        int fileCount = 1;
+        public BitcaskStore(string dbpath, int maxFileSize =256)
         {
+            _maxFileSize=maxFileSize;
+            _dbPath=dbpath;
             Directory.CreateDirectory(dbpath);
-            filePath = Path.Combine(dbpath , "KeyValueStore.Txt");
+            filePath = Path.Combine(dbpath , "cask.0");
             if (File.Exists(filePath) && !string.IsNullOrEmpty(File.ReadAllText(filePath)))
             {
                 foreach (var line in File.ReadAllLines(filePath))
@@ -34,16 +39,19 @@ namespace Bitcask.Core
         }
         
         public void Set(string key,string value)
-        {               
-            dict[key] = value;
-            File.WriteAllText(filePath, "");
-            var builder = new StringBuilder();
-            foreach(var kvp in dict)
+        {
+            Byte[] encodedByte = Encode(key,value);
+            using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Append)))
             {
-                builder.AppendLine($"{kvp.Key}:{kvp.Value}");
+                writer.Write(encodedByte);
             }
-            File.WriteAllText(filePath, builder.ToString());          
+            var fileInfo = new FileInfo(filePath);
+            if (fileInfo.Exists && fileInfo.Length > _maxFileSize)
+            {
+                filePath = Path.Combine(_dbPath, $"cask.{fileCount++}");
+            }
 
+            dict[key] = value;
         }
         public string Get(string key)
         {
