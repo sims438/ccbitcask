@@ -23,16 +23,38 @@ namespace Bitcask.Core
             _dbPath=dbpath;
             Directory.CreateDirectory(dbpath);
             filePath = Path.Combine(dbpath , "cask.0");
-            if (File.Exists(filePath) && !string.IsNullOrEmpty(File.ReadAllText(filePath)))
+            var fi = new FileInfo(filePath);
+            if (fi.Exists && fi.Length>0)
             {
-                foreach (var line in File.ReadAllLines(filePath))
+                using (var stream = File.OpenRead(filePath))
+                using (var reader = new BinaryReader(stream))
                 {
-                    var parts = line.Split(':', 2);
-                    if (parts.Length != 2) continue;
-                    string lineKey = parts[0];
-                    string lineValue = parts[1];
-                    dict[lineKey] = lineValue;
+                    while (stream.Position < stream.Length)
+                    {
+                        byte[] storedCrc = reader.ReadBytes(4);
+                        long timeStamp = reader.ReadInt64();
+                        int keySize  = reader.ReadInt32();
+                        int valSize  = reader.ReadInt32();
+                        byte[] keyBytes = reader.ReadBytes(keySize);
+                        byte[] valueBytes = reader.ReadBytes(valSize);
 
+                        string key = Encoding.UTF8.GetString(keyBytes);
+                        string value = Encoding.UTF8.GetString(valueBytes);
+                        byte[] payload = BitConverter.GetBytes(timeStamp)
+                            .Concat(BitConverter.GetBytes(keySize))
+                            .Concat(BitConverter.GetBytes(valSize))
+                            .Concat(keyBytes)
+                            .Concat(valueBytes).ToArray();
+
+                        byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
+                        if (!storedCrc.SequenceEqual(computedCrc))
+                        { 
+                            continue;
+                        }
+                     
+                        dict[key] = value;
+
+                    }
                 }
 
             }
