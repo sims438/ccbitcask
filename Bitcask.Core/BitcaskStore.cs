@@ -12,54 +12,86 @@ namespace Bitcask.Core
 {
     public class BitcaskStore
     {
-        Dictionary<string ,string> dict = new Dictionary<string, string>();
+        public readonly struct RecordMetadata
+        {
+            public readonly int FileId;
+            public readonly long ValuePosition;
+            public readonly int ValueSize;
+            public readonly long Timestamp;
+
+            public RecordMetadata(int fileId, long valuePosition, int valueSize, long timestamp)
+            {
+                FileId = fileId;
+                ValuePosition = valuePosition;
+                ValueSize = valueSize;
+                Timestamp = timestamp;
+            }
+        }
+        Dictionary<string , RecordMetadata> dict = new Dictionary<string, RecordMetadata>();
         private string filePath;
         private string _dbPath;
         public int _maxFileSize;
         int fileCount = 1;
-        public BitcaskStore(string dbpath, int maxFileSize =256)
+        
+        public BitcaskStore(string dbPath, int maxFileSize =256)
         {
             _maxFileSize=maxFileSize;
-            _dbPath=dbpath;
-            Directory.CreateDirectory(dbpath);
-            filePath = Path.Combine(dbpath , "cask.0");
-            var fi = new FileInfo(filePath);
-            if (fi.Exists && fi.Length>0)
+            _dbPath= dbPath;
+            Directory.CreateDirectory(dbPath);
+            List<string> files = Directory.GetFiles(dbPath, "cask.*")
+                      .OrderBy(f => ExtractFileId(f)).ToList();
+
+            foreach (string file in files)
             {
-                using (var stream = File.OpenRead(filePath))
-                using (var reader = new BinaryReader(stream))
+
+                filePath = Path.Combine(dbPath, file);
+                var fi = new FileInfo(filePath);
+                int fileId = ExtractFileId(file);
+                if (fi.Exists && fi.Length > 0)
                 {
-                    while (stream.Position < stream.Length)
+                    using (var stream = File.OpenRead(filePath))
+                    using (var reader = new BinaryReader(stream))
                     {
-                        byte[] storedCrc = reader.ReadBytes(4);
-                        long timeStamp = reader.ReadInt64();
-                        int keySize  = reader.ReadInt32();
-                        int valSize  = reader.ReadInt32();
-                        byte[] keyBytes = reader.ReadBytes(keySize);
-                        byte[] valueBytes = reader.ReadBytes(valSize);
+                        while (stream.Position < stream.Length)
+                        {
+                            byte[] storedCrc = reader.ReadBytes(4);
+                            long timeStamp = reader.ReadInt64();
+                            int keySize = reader.ReadInt32();
+                            int valSize = reader.ReadInt32();
+                            byte[] keyBytes = reader.ReadBytes(keySize);
+                            long valPosition = stream.Position; 
+                            byte[] valueBytes = reader.ReadBytes(valSize);
 
-                        string key = Encoding.UTF8.GetString(keyBytes);
-                        string value = Encoding.UTF8.GetString(valueBytes);
-                        byte[] payload = BitConverter.GetBytes(timeStamp)
-                            .Concat(BitConverter.GetBytes(keySize))
-                            .Concat(BitConverter.GetBytes(valSize))
-                            .Concat(keyBytes)
-                            .Concat(valueBytes).ToArray();
+                            string key = Encoding.UTF8.GetString(keyBytes);
+                            string value = Encoding.UTF8.GetString(valueBytes);
+                            byte[] payload = BitConverter.GetBytes(timeStamp)
+                                .Concat(BitConverter.GetBytes(keySize))
+                                .Concat(BitConverter.GetBytes(valSize))
+                                .Concat(keyBytes)
+                                .Concat(valueBytes).ToArray();
 
-                        byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
-                        if (!storedCrc.SequenceEqual(computedCrc))
-                        { 
-                            continue;
+                            byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
+                            if (!storedCrc.SequenceEqual(computedCrc))
+                            {
+                                continue;
+                            }
+                            var recordMetaData = new RecordMetadata(fileId,valPosition,valSize,timeStamp);
+
+                            dict[key] = recordMetaData;
+
                         }
-                     
-                        dict[key] = value;
-
                     }
-                }
 
+                }
             }
         }
-        
+
+        private int ExtractFileId(string fileName)
+        {
+           int id = int.Parse(fileName.Split('.')[1]);
+            return id;
+        }
+
         public void Set(string key,string value)
         {
             Byte[] encodedByte = Encode(key,value);
@@ -73,7 +105,7 @@ namespace Bitcask.Core
                 filePath = Path.Combine(_dbPath, $"cask.{fileCount++}");
             }
 
-            dict[key] = value;
+            //dict[key] = RecordMetadata;
         }
         public string Get(string key)
         {
@@ -110,11 +142,6 @@ namespace Bitcask.Core
             val = BinaryPrimitives.ReadInt32LittleEndian(bytes);
             return val;
         }
-
-
-
-
-
 
     }
 }
