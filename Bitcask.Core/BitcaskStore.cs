@@ -31,7 +31,7 @@ namespace Bitcask.Core
         private string filePath;
         private string _dbPath;
         public int _maxFileSize;
-        int fileCount = 1;
+        int fileCount;
         
         public BitcaskStore(string dbPath, int maxFileSize =256)
         {
@@ -40,11 +40,13 @@ namespace Bitcask.Core
             Directory.CreateDirectory(dbPath);
             List<string> files = Directory.GetFiles(dbPath, "cask.*")
                       .OrderBy(f => ExtractFileId(f)).ToList();
+            fileCount= files.Count;
+            
 
             foreach (string file in files)
             {
 
-                filePath = Path.Combine(dbPath, file);
+                filePath = file;
                 var fi = new FileInfo(filePath);
                 int fileId = ExtractFileId(file);
                 if (fi.Exists && fi.Length > 0)
@@ -86,15 +88,17 @@ namespace Bitcask.Core
             }
         }
 
-        private int ExtractFileId(string fileName)
+        private int ExtractFileId(string path)
         {
-           int id = int.Parse(fileName.Split('.')[1]);
-            return id;
+            string fileName = Path.GetFileName(path);
+            return int.Parse(fileName.Split('.')[1]); ;
         }
 
         public void Set(string key,string value)
         {
-            Byte[] encodedByte = Encode(key,value);
+            Byte[] encodedByte = Encode(key,value,out long timestamp,out int valueOffsetInRecord);
+            int fileId = ExtractFileId(filePath);
+            long recordStart = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
             using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Append)))
             {
                 writer.Write(encodedByte);
@@ -104,23 +108,27 @@ namespace Bitcask.Core
             {
                 filePath = Path.Combine(_dbPath, $"cask.{fileCount++}");
             }
+            int valueSize = encodedByte.Length - valueOffsetInRecord;
 
-            //dict[key] = RecordMetadata;
+            dict[key] = new RecordMetadata(fileId,recordStart+valueOffsetInRecord,valueSize,timestamp);
         }
         public string Get(string key)
         {
             return dict.TryGetValue(key, out var value) ? value : null;
         }
 
-        public byte[] Encode(string key , string value)
+        public byte[] Encode(string key , string value,out long timestamp, out int valueOffsetInRecord)
         {
             //Timestamp,Key Size, Value Size,Key,Value
-            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             byte[] timestampBytes = BitConverter.GetBytes(timestamp);
             byte[] keyBytes = Encoding.UTF8.GetBytes(key);
             byte[] keySizeByte = BitConverter.GetBytes(keyBytes.Length);
             byte[] valueBytes = Encoding.UTF8.GetBytes(value);
+            valueOffsetInRecord = 4 + 8 + 4 + 4 + keyBytes.Length;
             byte[] valueSizeByte = BitConverter.GetBytes(valueBytes.Length);
+            
 
             int payloadLength = timestampBytes.Length + keySizeByte.Length
                        + valueSizeByte.Length + keyBytes.Length + valueBytes.Length;
