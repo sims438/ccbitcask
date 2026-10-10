@@ -86,6 +86,11 @@ namespace Bitcask.Core
 
                 }
             }
+            if (files.Count == 0)
+            {
+                filePath = Path.Combine(dbPath, "cask.0");
+                fileCount = 1;
+            }
         }
 
         private int ExtractFileId(string path)
