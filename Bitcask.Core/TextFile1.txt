@@ -1,4 +1,6 @@
-﻿1- lookup the file
-2-find the value offset within it
-3-extract the value
-4- return it
+﻿//create a delete function
+//find the latest file
+//CRC | timestamp | keySize=3 | valueSize=-1 | "Key"
+//add a encode method for this tombstone
+//append encoded value
+//map key to metadata
