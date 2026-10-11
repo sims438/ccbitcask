@@ -1,0 +1,4 @@
+﻿1- lookup the file
+2-find the value offset within it
+3-extract the value
+4- return it

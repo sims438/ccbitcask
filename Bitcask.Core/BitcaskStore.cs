@@ -119,7 +119,26 @@ namespace Bitcask.Core
         }
         public string Get(string key)
         {
-            return dict.TryGetValue(key, out var value) ? value : null;
+            RecordMetadata? metaData = dict.TryGetValue(key, out var value) ? value : null;
+            if (metaData == null)
+                return null;
+            int fileId = metaData.Value.FileId;
+            string fileName = $"cask.{fileId}";
+            string fileDirectory  = Path.Combine(_dbPath, fileName);
+            var fi = new FileInfo(fileDirectory);
+            string strValue = "";
+            if (fi.Exists && fi.Length > 0)
+            {
+                using var fs = new FileStream(fileDirectory, FileMode.Open, FileAccess.Read);
+                using var br = new BinaryReader(fs);
+                fs.Seek(metaData.Value.ValuePosition, SeekOrigin.Begin);
+                byte[] byteValue = br.ReadBytes(metaData.Value.ValueSize);
+                strValue = Encoding.UTF8.GetString(byteValue);
+
+            }
+            return strValue;
+
+
         }
 
         public byte[] Encode(string key , string value,out long timestamp, out int valueOffsetInRecord)
