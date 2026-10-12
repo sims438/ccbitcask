@@ -2,9 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.Intrinsics.Arm;
 using System.Text;
-using System.Threading.Tasks;
 using System.IO.Hashing;
 
 namespace Bitcask.Core
@@ -60,26 +58,43 @@ namespace Bitcask.Core
                             int keySize = reader.ReadInt32();
                             int valSize =  reader.ReadInt32();                      
                             byte[] keyBytes = reader.ReadBytes(keySize);
-                            if (valSize == -1)
-                                continue;
+                           
                             long valPosition = stream.Position; 
-                            byte[] valueBytes = reader.ReadBytes(valSize);
+                            string key = Encoding.UTF8.GetString(keyBytes);
 
-                            string key = Encoding.UTF8.GetString(keyBytes);                     
-                            byte[] payload = BitConverter.GetBytes(timeStamp)
-                                .Concat(BitConverter.GetBytes(keySize))
+                            if (valSize == -1)
+                            {
+                                byte[] payloadDel = BitConverter.GetBytes(timeStamp)
+                                .Concat(BitConverter.GetBytes(keySize))                               
                                 .Concat(BitConverter.GetBytes(valSize))
                                 .Concat(keyBytes)
-                                .Concat(valueBytes).ToArray();
-
-                            byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
-                            if (!storedCrc.SequenceEqual(computedCrc))
-                            {
+                                .ToArray();
+                                byte[] computedCrcDel = System.IO.Hashing.Crc32.Hash(payloadDel);
+                                if (storedCrc.SequenceEqual(computedCrcDel))
+                                {
+                                    dict.Remove(key);
+                                }
                                 continue;
-                            }
-                            var recordMetaData = new RecordMetadata(fileId,valPosition,valSize,timeStamp);
 
-                            dict[key] = recordMetaData;
+                            }
+                            else
+                            {
+                                byte[] valueBytes = reader.ReadBytes(valSize);
+                                byte[] payload = BitConverter.GetBytes(timeStamp)
+                                    .Concat(BitConverter.GetBytes(keySize))
+                                    .Concat(BitConverter.GetBytes(valSize))
+                                    .Concat(keyBytes)
+                                    .Concat(valueBytes).ToArray();
+
+                                byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
+                                if (!storedCrc.SequenceEqual(computedCrc))
+                                {
+                                    continue;
+                                }
+                                var recordMetaData = new RecordMetadata(fileId, valPosition, valSize, timeStamp);
+
+                                dict[key] = recordMetaData;
+                            }
 
                         }
                     }
@@ -178,9 +193,12 @@ namespace Bitcask.Core
             {
                 writer.Write(data);
             }
+            var fileInfo = new FileInfo(filePath);
+            if (fileInfo.Exists && fileInfo.Length > _maxFileSize)
+            {
+                filePath = Path.Combine(_dbPath, $"cask.{fileCount++}");
+            }
             dict.Remove(key);
-
-
 
         }
 
@@ -200,7 +218,6 @@ namespace Bitcask.Core
             byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
             byte[] record = computedCrc.Concat(payload).ToArray();
             return record;
-
 
         }
     }

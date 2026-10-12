@@ -1,6 +1,3 @@
-﻿//create a delete function
-//find the latest file
-//CRC | timestamp | keySize=3 | valueSize=-1 | "Key"
-//add a encode method for this tombstone
-//append encoded value
-//map key to metadata
+﻿Corrections:
+1-Add a rollover check to delete
+2-check crc in delete remove key if it passes 
