@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
-using System.IO.Hashing;
+
 
 namespace Bitcask.Core
 {
@@ -24,7 +23,7 @@ namespace Bitcask.Core
                 Timestamp = timestamp;
             }
         }
-        Dictionary<string , RecordMetadata> dict = new Dictionary<string, RecordMetadata>();
+        Dictionary<string , RecordMetadata> _index = new Dictionary<string, RecordMetadata>();
         private string filePath;
         private string _dbPath;
         private int _maxFileSize;
@@ -37,7 +36,8 @@ namespace Bitcask.Core
             Directory.CreateDirectory(dbPath);
             List<string> files = Directory.GetFiles(dbPath, "cask.*")
                       .OrderBy(f => ExtractFileId(f)).ToList();
-            fileCount= files.Count;
+            //for segmentation
+            fileCount= files.Count == 0?1:files.Max(f =>ExtractFileId(f)+1);
             
 
             foreach (string file in files)
@@ -72,7 +72,7 @@ namespace Bitcask.Core
                                 byte[] computedCrcDel = System.IO.Hashing.Crc32.Hash(payloadDel);
                                 if (storedCrc.SequenceEqual(computedCrcDel))
                                 {
-                                    dict.Remove(key);
+                                    _index.Remove(key);
                                 }
                                 continue;
 
@@ -93,7 +93,7 @@ namespace Bitcask.Core
                                 }
                                 var recordMetaData = new RecordMetadata(fileId, valPosition, valSize, timeStamp);
 
-                                dict[key] = recordMetaData;
+                                _index[key] = recordMetaData;
                             }
 
                         }
@@ -116,8 +116,8 @@ namespace Bitcask.Core
 
         public void Set(string key,string value)
         {
-            
-            Byte[] encodedByte = Encode(key,value,out long timestamp,out int valueOffsetInRecord);
+
+            Byte[] encodedByte = Encode(key, value, out long timestamp, out int valueOffsetInRecord, false);
             int fileId = ExtractFileId(filePath);
             long recordStart = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
             using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Append)))
@@ -131,14 +131,13 @@ namespace Bitcask.Core
             }
             int valueSize = encodedByte.Length - valueOffsetInRecord;
 
-            dict[key] = new RecordMetadata(fileId,recordStart+valueOffsetInRecord,valueSize,timestamp);
+            _index[key] = new RecordMetadata(fileId,recordStart+valueOffsetInRecord,valueSize,timestamp);
         }
         public string Get(string key)
         {
-            RecordMetadata? metaData = dict.TryGetValue(key, out var value) ? value : null;
-            if (metaData == null)
-                return null;
-            int fileId = metaData.Value.FileId;
+            if (!_index.TryGetValue(key, out var metaData))
+                return null;           
+            int fileId = metaData.FileId;
             string fileName = $"cask.{fileId}";
             string fileDirectory  = Path.Combine(_dbPath, fileName);
             var fi = new FileInfo(fileDirectory);
@@ -147,47 +146,19 @@ namespace Bitcask.Core
             {
                 using var fs = new FileStream(fileDirectory, FileMode.Open, FileAccess.Read);
                 using var br = new BinaryReader(fs);
-                fs.Seek(metaData.Value.ValuePosition, SeekOrigin.Begin);
-                byte[] byteValue = br.ReadBytes(metaData.Value.ValueSize);
+                fs.Seek(metaData.ValuePosition, SeekOrigin.Begin);
+                byte[] byteValue = br.ReadBytes(metaData.ValueSize);
                 strValue = Encoding.UTF8.GetString(byteValue);
-
 
             }
             return strValue;
-
-
-        }
-
-        public byte[] Encode(string key , string value,out long timestamp, out int valueOffsetInRecord)
-        {
-            //Timestamp,Key Size, Value Size,Key,Value
-
-            timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            byte[] timestampBytes = BitConverter.GetBytes(timestamp);
-            byte[] keyBytes = Encoding.UTF8.GetBytes(key);
-            byte[] keySizeByte = BitConverter.GetBytes(keyBytes.Length);
-            byte[] valueBytes = Encoding.UTF8.GetBytes(value);
-            valueOffsetInRecord = 4 + 8 + 4 + 4 + keyBytes.Length;
-            byte[] valueSizeByte = BitConverter.GetBytes(valueBytes.Length);
-            
-            byte[] payload = timestampBytes
-    .Concat(keySizeByte)
-    .Concat(valueSizeByte)
-    .Concat(keyBytes)
-    .Concat(valueBytes)
-    .ToArray();
-            byte[] crcBytes = System.IO.Hashing.Crc32.Hash(payload);
-
-            byte[] record = crcBytes.Concat(payload).ToArray();
-
-            return record;
-        }
+        }   
         public void Delete(string key)
         {
-            if (!dict.ContainsKey(key))
+            if (!_index.ContainsKey(key))
                 return;
-            
-            byte[] data = EncodeDel(key, out long timestamp);
+
+            byte[] data = Encode(key,null, out long timestamp, out _, true);
             long recordStart = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
             using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Append)))
             {
@@ -198,27 +169,46 @@ namespace Bitcask.Core
             {
                 filePath = Path.Combine(_dbPath, $"cask.{fileCount++}");
             }
-            dict.Remove(key);
+            _index.Remove(key);
 
         }
-
-        private byte[] EncodeDel(string key, out long timestamp)
+        public byte[] Encode(string key, string value, out long timestamp, out int valueOffsetInRecord,bool _isDeleted)
         {
+            //Timestamp,Key Size, Value Size,Key,Value
+
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             byte[] timestampBytes = BitConverter.GetBytes(timestamp);
             byte[] keyBytes = Encoding.UTF8.GetBytes(key);
             byte[] keySizeByte = BitConverter.GetBytes(keyBytes.Length);
-            byte[] valueSizeBytes = BitConverter.GetBytes(-1);
+            byte[] valueBytes = _isDeleted ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(value);
+            valueOffsetInRecord = 4 + 8 + 4 + 4 + keyBytes.Length;
+            byte[] valueSizeByte = BitConverter.GetBytes(_isDeleted?-1 : valueBytes.Length);
+            byte[] payload;
 
-            byte[] payload = timestampBytes
+            if(_isDeleted)
+            {
+                 payload = timestampBytes
                             .Concat(keySizeByte)
-                            .Concat(valueSizeBytes)
+                            .Concat(valueSizeByte)
                             .Concat(keyBytes)
                              .ToArray();
-            byte[] computedCrc = System.IO.Hashing.Crc32.Hash(payload);
-            byte[] record = computedCrc.Concat(payload).ToArray();
-            return record;
+            }
+            else
+            {
+                 payload = timestampBytes
+                                 .Concat(keySizeByte)
+                                .Concat(valueSizeByte)
+                                .Concat(keyBytes)
+                                .Concat(valueBytes)
+                                .ToArray();
+            }
 
+               
+            byte[] crcBytes = System.IO.Hashing.Crc32.Hash(payload);
+
+            byte[] record = crcBytes.Concat(payload).ToArray();
+
+            return record;
         }
     }
 }
