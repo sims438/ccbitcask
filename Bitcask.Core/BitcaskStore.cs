@@ -29,7 +29,7 @@ namespace Bitcask.Core
         private int _maxFileSize;
         private int fileCount;
         
-        public BitcaskStore(string dbPath, int maxFileSize =256)
+        public BitcaskStore(string dbPath, int maxFileSize =60)
         {
             _maxFileSize=maxFileSize;
             _dbPath= dbPath;
@@ -116,23 +116,29 @@ namespace Bitcask.Core
 
         public void Set(string key,string value)
         {
-
+            EnsureActiveFileHasRoom();
             Byte[] encodedByte = Encode(key, value, out long timestamp, out int valueOffsetInRecord, false);
             int fileId = ExtractFileId(filePath);
             long recordStart = File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
+            
             using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Append)))
             {
                 writer.Write(encodedByte);
-            }
+            }            
+            int valueSize = encodedByte.Length - valueOffsetInRecord;
+
+            _index[key] = new RecordMetadata(fileId,recordStart+valueOffsetInRecord,valueSize,timestamp);
+        }
+
+        private void EnsureActiveFileHasRoom()
+        {
             var fileInfo = new FileInfo(filePath);
             if (fileInfo.Exists && fileInfo.Length > _maxFileSize)
             {
                 filePath = Path.Combine(_dbPath, $"cask.{fileCount++}");
             }
-            int valueSize = encodedByte.Length - valueOffsetInRecord;
-
-            _index[key] = new RecordMetadata(fileId,recordStart+valueOffsetInRecord,valueSize,timestamp);
         }
+
         public string Get(string key)
         {
             if (!_index.TryGetValue(key, out var metaData))

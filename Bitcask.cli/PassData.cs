@@ -27,7 +27,10 @@ namespace Bitcask.cli
                 var result = store.Get(key);
                 Console.WriteLine(result ?? "(nil)");
             }
-
+            if (command == "del")
+            {
+                 store.Delete(key);
+            }
         }
         
 
