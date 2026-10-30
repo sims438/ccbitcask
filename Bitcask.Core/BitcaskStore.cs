@@ -30,8 +30,8 @@ namespace Bitcask.Core
         private readonly string _dbPath;
         private readonly int _maxFileSize;
         private int _nextFileId;
-        private int _tombstone = -1;
-        int _headerSize = 4 + 8 + 4 + 4; // CRC32 (4 bytes) + Timestamp (8 bytes) + Key Size (4 bytes) + Value Size (4 bytes)
+        private const int _tombstone = -1;
+        private const int _headerSize = 4 + 8 + 4 + 4; // CRC32 (4 bytes) + Timestamp (8 bytes) + Key Size (4 bytes) + Value Size (4 bytes)
 
         public BitcaskStore(string dbPath, int maxFileSize =60)
         {
@@ -76,7 +76,8 @@ namespace Bitcask.Core
                                 byte[] computedCrcDel = System.IO.Hashing.Crc32.Hash(payloadDel);
                                 if (storedCrc.SequenceEqual(computedCrcDel))
                                 {
-                                    _index.Remove(key);
+                                  
+                                    break;
                                 }
                                 continue;
 
@@ -112,6 +113,11 @@ namespace Bitcask.Core
             }
         }
 
+        private void Truncate(string file, object recordStart)
+        {
+            throw new NotImplementedException();
+        }
+
         private int ExtractFileId(string path)
         {
             string fileName = Path.GetFileName(path);
@@ -121,6 +127,7 @@ namespace Bitcask.Core
         public void Set(string key,string value)
         {
             ArgumentNullException.ThrowIfNull(value);
+            ArgumentNullException.ThrowIfNull(key);
             Byte[] record = Encode(key, value, out long timestamp, out int valueOffsetInRecord, false);       
             long recordStart = Append(record); 
             _index[key] = new RecordMetadata(ExtractFileId(_activePath),recordStart +valueOffsetInRecord,record.Length-valueOffsetInRecord,timestamp);
@@ -162,15 +169,15 @@ namespace Bitcask.Core
                 strValue = Encoding.UTF8.GetString(byteValue);
 
             }
-            return strValue;
+            return strValue == "" ? null : strValue;
         }   
         public void Delete(string key)
         {
             if (!_index.ContainsKey(key))
                 return;
 
-            long start = Append(Encode(key,null, out long timestamp, out _, true));           
-            var fileInfo = new FileInfo(_activePath);
+            Append(Encode(key,null, out long timestamp, out _, true));           
+            //var fileInfo = new FileInfo(_activePath);
             _index.Remove(key);
 
         }
