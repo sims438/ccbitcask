@@ -57,15 +57,29 @@ namespace Bitcask.Core
                     {
                         while (stream.Position < stream.Length)
                         {
+                            long recordStart = stream.Position;
+                            //what if write is broken midway? we need to check if we have enough bytes to read the header, if not break the loop and ignore this record
+                            if (stream.Length - stream.Position < _headerSize)
+                            {                
+                                break;
+                            }
                             byte[] storedCrc = reader.ReadBytes(4);
                             long timeStamp = reader.ReadInt64();
                             int keySize = reader.ReadInt32();
                             int valSize =  reader.ReadInt32();                      
                             byte[] keyBytes = reader.ReadBytes(keySize);
-                           
+                            //in case file values are corrupted and we have negative key size or value size, we should break the loop and ignore this record
+                            if (keySize<0 || valSize < _tombstone)
+                            {
+                                break;
+                            }
+
                             long valPosition = stream.Position; 
                             string key = Encoding.UTF8.GetString(keyBytes);
-
+                            long valueLen = valSize == _tombstone ? 0 : valSize;
+                            // does whole record fit in the file? if not, break the loop and ignore this record
+                            if (recordStart + _headerSize + keySize + valueLen > stream.Length)
+                                break;
                             if (valSize == _tombstone)
                             {
                                 byte[] payloadDel = BitConverter.GetBytes(timeStamp)
@@ -76,8 +90,7 @@ namespace Bitcask.Core
                                 byte[] computedCrcDel = System.IO.Hashing.Crc32.Hash(payloadDel);
                                 if (storedCrc.SequenceEqual(computedCrcDel))
                                 {
-                                  
-                                    break;
+                                    _index.Remove(key);
                                 }
                                 continue;
 
