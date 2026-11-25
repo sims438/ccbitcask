@@ -219,5 +219,28 @@ namespace Bitcask.Core
 
             return record;
         }
+        public void Merge()
+        {
+            //1-find the non active files
+            List<int> inactiveFileIds = GetInactiveFileIds();
+            //find dead records ratio
+           float _deadRecordsRatio = FindDeadRecordRatio()
+           
+
+        }
+
+        private float FindDeadRecordRatio()
+        {
+            throw new NotImplementedException();
+        }
+
+        private List<int> GetInactiveFileIds()
+        {
+            int activeFileId = ExtractFileId(_activePath);
+            return Directory.GetFiles(_dbPath, "cask.*").
+                Select(ExtractFileId).Where(id => id != activeFileId).
+                OrderBy(id => id)
+                .ToList();
+        }
     }
 }

@@ -1,3 +1,1 @@
-﻿Corrections:
-1-Add a rollover check to delete
-2-check crc in delete remove key if it passes 
+﻿
