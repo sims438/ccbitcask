@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Runtime.Intrinsics.X86;
+using System.Text;
+using static System.Net.WebRequestMethods;
 
 
 namespace Bitcask.Core
@@ -15,6 +18,7 @@ namespace Bitcask.Core
             public readonly long ValuePosition;
             public readonly int ValueSize;
             public readonly long Timestamp;
+
             
 
             public RecordMetadata(int fileId, long valuePosition, int valueSize, long timestamp)
@@ -32,7 +36,8 @@ namespace Bitcask.Core
         private int _nextFileId;
         private const int _tombstone = -1;
         private const int _headerSize = 4 + 8 + 4 + 4; // CRC32 (4 bytes) + Timestamp (8 bytes) + Key Size (4 bytes) + Value Size (4 bytes)
-
+        private const int _maxFileLimit = 4;
+        private const int _deadLimit = 4;
         public BitcaskStore(string dbPath, int maxFileSize =60)
         {
             _maxFileSize=maxFileSize;
@@ -224,14 +229,59 @@ namespace Bitcask.Core
             //1-find the non active files
             List<int> inactiveFileIds = GetInactiveFileIds();
             //find dead records ratio
-           float _deadRecordsRatio = FindDeadRecordRatio()
-           
+            bool shouldMerge = ShouldMerge(inactiveFileIds);
+            if (shouldMerge == true && inactiveFileIds.Count > _maxFileLimit)
+            {
+                Merge();
+            }
+            
 
         }
 
-        private float FindDeadRecordRatio()
+        private bool ShouldMerge(List<int> inactiveFileIds)
         {
-            throw new NotImplementedException();
+            //dead records = tombstone + overwritten
+            //RecordMetadata(int fileId, long valuePosition, int valueSize, long timestamp)
+            //if latest records are in dict, then we can check via file id
+            /*i am considering total live records/total no of records for now, ill change it later if needed
+            Case 1 - all records in dict dont point to a file->consider the whole file size
+Case2 - they do point->liveRecord + = record.size, deadRecords = filesize - liveRecord
+do this for all the files ?*/
+            //make one pass over dict, add live bytes per file id, compare against file size
+            long totalRecords = 0;
+            long liveRecords = 0;
+            var live = ComputeLivwBytes();
+            foreach(int id in inactiveFileIds)
+            {
+               long fileSize = new FileInfo(Path.Combine(_dbPath, $"Cask.{id}")).Length;
+                if (fileSize == 0) continue;
+                long deadBytes = fileSize - live.GetValueOrDefault(id);
+                if((double)deadBytes / fileSize > _deadLimit)
+                {
+                    return true;
+                }
+            }
+            return false;          
+
+        }
+
+        private Dictionary<int,long> ComputeLivwBytes()
+        {
+            var live = new Dictionary<int, long>();
+            foreach(var kvp in _index)
+            {
+                int fileId = kvp.Value.FileId;
+                int valueSize = kvp.Value.ValueSize;
+                if (live.ContainsKey(fileId))
+                {
+                    live[fileId] += _headerSize+ Encoding.UTF8.GetByteCount(kvp.Key)+ valueSize;
+                }
+                else
+                {
+                    live[fileId] = _headerSize + Encoding.UTF8.GetByteCount(kvp.Key) + valueSize;
+                }
+            }
+            return live;
         }
 
         private List<int> GetInactiveFileIds()
